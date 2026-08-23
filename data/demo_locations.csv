@@ -1,0 +1,9 @@
+demo_case_id,road_id,latitude,longitude,location_description,associated_demo_image_filename
+DEMO-001,RD-001,34.0101,-117.98989999999999,Near intersection on Synthetic Road 1,demo_pothole_001.jpg
+DEMO-002,RD-002,34.020100000000006,-117.9799,Near intersection on Synthetic Road 2,demo_pothole_002.jpg
+DEMO-003,RD-003,34.030100000000004,-117.9699,Near intersection on Synthetic Road 3,demo_pothole_003.jpg
+DEMO-004,RD-004,34.0401,-117.95989999999999,Near intersection on Synthetic Road 4,demo_pothole_004.jpg
+DEMO-005,RD-005,34.0501,-117.9499,Near intersection on Synthetic Road 5,demo_pothole_005.jpg
+DEMO-006,RD-006,34.060100000000006,-117.9399,Near intersection on Synthetic Road 6,demo_pothole_006.jpg
+DEMO-007,RD-007,34.070100000000004,-117.9299,Near intersection on Synthetic Road 7,demo_pothole_007.jpg
+DEMO-008,RD-008,34.0801,-117.9199,Near intersection on Synthetic Road 8,demo_pothole_008.jpg
