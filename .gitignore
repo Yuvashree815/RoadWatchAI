@@ -58,3 +58,7 @@ images/
 *.swo
 .DS_Store
 Thumbs.db
+
+# ChromaDB generated databases
+chroma_demo_db/
+chroma_test_db/
