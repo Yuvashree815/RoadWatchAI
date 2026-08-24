@@ -31,6 +31,7 @@ def run_complaint_agent(
     contract_data: Optional[Dict[str, Any]],
     officer_data: Optional[Dict[str, Any]],
     verification_result: Optional[Dict[str, Any]],
+    complaint_id: Optional[str] = None,
 ) -> dict:
     """
     Assemble a structured complaint record from verified agent evidence.
@@ -163,7 +164,8 @@ def run_complaint_agent(
         )
 
     # ── Assemble the complaint record ─────────────────────────────────────────
-    complaint_id = f"DEMO-COMPLAINT-{str(uuid.uuid4())[:8].upper()}"
+    if not complaint_id:
+        complaint_id = f"DEMO-COMPLAINT-{str(uuid.uuid4())[:8].upper()}"
     generated_at = datetime.now(timezone.utc).isoformat()
 
     return {

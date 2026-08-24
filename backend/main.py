@@ -47,6 +47,7 @@ class HealthResponse(BaseModel):
 
 class AnalysisResponse(BaseModel):
     run_id: str
+    complaint_id: Optional[str] = None
     vision_result: Optional[Dict[str, Any]] = None
     location_result: Optional[Dict[str, Any]] = None
     road_data: Optional[Dict[str, Any]] = None
@@ -58,6 +59,8 @@ class AnalysisResponse(BaseModel):
     complaint_record: Optional[Dict[str, Any]] = None
     final_quality_score: Optional[float] = None
     quality_explanation: Optional[str] = None
+    submission_status: Optional[str] = None
+    submission_result: Optional[Dict[str, Any]] = None
     disclaimer: str = Field(
         default=(
             "SYNTHETIC DEMO RECORD — All data is fictional and intended "
@@ -78,6 +81,15 @@ async def health_check():
         message="RoadWatch AI backend is running.",
         version="0.1.0",
     )
+
+
+@app.get("/api/config")
+async def get_system_config():
+    """
+    Returns sanitized system and observability configuration for frontend and test diagnostics.
+    """
+    from backend.observability import get_sanitized_config
+    return get_sanitized_config()
 
 
 @app.post("/api/analyze", response_model=AnalysisResponse)

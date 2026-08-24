@@ -27,6 +27,7 @@ class LocationResult(TypedDict):
 
 class GraphState(TypedDict):
     run_id: str
+    complaint_id: Optional[str]
     image_url: str
     user_location_hint: Optional[str]
     exif_gps: Optional[Dict[str, float]]  # {"latitude": ..., "longitude": ...} if available
@@ -49,3 +50,7 @@ class GraphState(TypedDict):
     complaint_record: Optional[Dict[str, Any]]
     final_quality_score: Optional[float]
     quality_explanation: Optional[str]
+
+    # Submission status & tracking
+    submission_status: Optional[str]  # "DETECTED" | "RESEARCHED" | "VERIFIED" | "COMPLAINT_GENERATED" | "QUALITY_APPROVED" | "QUALITY_REJECTED" | "SUBMITTED" | "SUBMISSION_FAILED" | "SUBMISSION_SKIPPED"
+    submission_result: Optional[Dict[str, Any]]

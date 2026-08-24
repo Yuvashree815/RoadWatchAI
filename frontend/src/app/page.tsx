@@ -21,6 +21,7 @@ const INITIAL_STEPS: WorkflowStep[] = [
   { id: "verification", name: "Evidence Verification", description: "Validating cross-agent evidence & detecting conflicts", status: "pending" },
   { id: "complaint", name: "Complaint Generation", description: "Assembling structured complaint record", status: "pending" },
   { id: "quality_evaluation", name: "Quality Evaluation", description: "Calculating deterministic quality score", status: "pending" },
+  { id: "email_submission", name: "Email Submission", description: "Transmitting verified complaint & PDF report", status: "pending" },
 ];
 
 export default function RoadWatchDemo() {
@@ -300,6 +301,47 @@ export default function RoadWatchDemo() {
           `[${timestamp}] 🏆 Quality Score: ${data.final_quality_score}/100`,
         ]);
         updateStep("quality_evaluation", "completed", `Score: ${data.final_quality_score}/100`);
+        updateStep("email_submission", "running", "Processing submission...");
+        break;
+
+      case "submission_completed":
+        accumulator.submission_status = data.submission_status || "SUBMITTED";
+        accumulator.submission_result = data;
+        setActiveLog((prev) => [
+          ...prev,
+          `[${timestamp}] ✉️ Complaint submitted to ${data.recipient || "demo inbox"} (${data.is_mock ? "Mock Mode" : "Live SMTP"})`,
+        ]);
+        updateStep("email_submission", "completed", data.is_mock ? "Simulated (Mock)" : "Sent via SMTP");
+        break;
+
+      case "submission_failed":
+        accumulator.submission_status = "SUBMISSION_FAILED";
+        accumulator.submission_result = data;
+        setActiveLog((prev) => [
+          ...prev,
+          `[${timestamp}] ❌ Email submission failed: ${data.error || "Unknown error"}`,
+        ]);
+        updateStep("email_submission", "error", "Submission Failed");
+        break;
+
+      case "submission_skipped":
+        accumulator.submission_status = "SUBMISSION_SKIPPED";
+        accumulator.submission_result = data;
+        setActiveLog((prev) => [
+          ...prev,
+          `[${timestamp}] ℹ️ Email submission skipped (EMAIL_ENABLED=false)`,
+        ]);
+        updateStep("email_submission", "warning", "Skipped (Disabled)");
+        break;
+
+      case "submission_rejected":
+        accumulator.submission_status = "QUALITY_REJECTED";
+        accumulator.submission_result = data;
+        setActiveLog((prev) => [
+          ...prev,
+          `[${timestamp}] ⚠️ Automated submission held: ${data.reason || "Quality/evidence review needed"}`,
+        ]);
+        updateStep("email_submission", "warning", "Held for Review");
         break;
 
       case "workflow_completed":
@@ -316,6 +358,8 @@ export default function RoadWatchDemo() {
           complaint_record: data.complaint_record || accumulator.complaint_record,
           final_quality_score: data.final_quality_score ?? accumulator.final_quality_score,
           quality_explanation: data.quality_explanation || accumulator.quality_explanation,
+          submission_status: data.submission_status || accumulator.submission_status || "COMPLAINT_GENERATED",
+          submission_result: data.submission_result || accumulator.submission_result,
         });
         break;
 
@@ -1021,6 +1065,108 @@ export default function RoadWatchDemo() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* H. Formal Complaint Submission & Delivery Tracking */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>✉️</span> H. Complaint Submission & Delivery Tracking
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Automated delivery of verified complaint & PDF report to designated authority</p>
+                    </div>
+                    <div>
+                      {analysisResult.submission_status === "SUBMITTED" && (
+                        <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          SUBMITTED ✓
+                        </span>
+                      )}
+                      {analysisResult.submission_status === "SUBMISSION_SKIPPED" && (
+                        <span className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold flex items-center gap-1.5">
+                          <span>ℹ️</span> SUBMISSION SKIPPED
+                        </span>
+                      )}
+                      {analysisResult.submission_status === "QUALITY_REJECTED" && (
+                        <span className="px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-bold flex items-center gap-1.5">
+                          <span>⚠️</span> QUALITY REJECTED / REVIEW
+                        </span>
+                      )}
+                      {analysisResult.submission_status === "SUBMISSION_FAILED" && (
+                        <span className="px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-bold flex items-center gap-1.5">
+                          <span>❌</span> SUBMISSION FAILED
+                        </span>
+                      )}
+                      {(!analysisResult.submission_status || analysisResult.submission_status === "COMPLAINT_GENERATED") && (
+                        <span className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-bold flex items-center gap-1.5">
+                          <span>📋</span> GENERATED ✓ (VALIDATED)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 rounded-xl p-5 border border-slate-800 space-y-4 text-xs">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Identified Responsible Authority */}
+                      <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-800 space-y-2">
+                        <div className="flex items-center gap-2 text-slate-400 font-medium text-[11px]">
+                          <span>🏛️</span> Identified Responsible Authority
+                        </div>
+                        <div className="text-white font-semibold text-sm">
+                          {analysisResult.officer_data?.officer?.officer_name ||
+                           analysisResult.officer_data?.officer_name ||
+                           analysisResult.complaint_record?.responsible_officer?.officer_name ||
+                           "Department of Synthetic Works"}
+                        </div>
+                        <div className="text-slate-400 text-[11px]">
+                          Officer ID: <span className="font-mono text-slate-300">{analysisResult.officer_data?.officer?.officer_id || analysisResult.officer_data?.officer_id || analysisResult.complaint_record?.responsible_officer?.officer_id || "OFF-002"}</span>
+                          <span className="mx-1.5 text-slate-600">|</span>
+                          Jurisdiction: <span className="text-slate-300">{analysisResult.officer_data?.officer?.jurisdiction || analysisResult.officer_data?.jurisdiction || "North District"}</span>
+                        </div>
+                      </div>
+
+                      {/* Actual Delivery Recipient */}
+                      <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-slate-400 font-medium text-[11px]">
+                            <span>📬</span> Actual Delivery Recipient
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-semibold">
+                            Demo Recipient
+                          </span>
+                        </div>
+                        <div className="text-indigo-300 font-mono font-medium text-xs truncate">
+                          {analysisResult.submission_result?.recipient || "demo-authority@roadwatch.local"}
+                        </div>
+                        <div className="text-slate-400 text-[11px]">
+                          Transmission: <span className="text-slate-300">{analysisResult.submission_result?.is_mock ? "Simulated (Mock Mode — Zero Quota)" : (analysisResult.submission_result?.status === "SUBMITTED" ? "Live SMTP (TLS)" : "Configured Destination")}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Delivery Details & Attachments Row */}
+                    <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                      <div className="flex items-center gap-2 text-slate-300">
+                        <span className="text-emerald-400">✓</span>
+                        <span>Attached PDF:</span>
+                        <span className="font-mono text-indigo-400">
+                          RoadWatch_Complaint_{analysisResult.complaint_record?.complaint_id || analysisResult.complaint_id || "report"}.pdf
+                        </span>
+                      </div>
+
+                      <div className="text-slate-400 flex items-center gap-2">
+                        <span>Status:</span>
+                        <span className="font-semibold text-slate-200">
+                          {analysisResult.submission_result?.message || (analysisResult.submission_status === "SUBMITTED" ? "Complaint and PDF successfully transmitted" : "Submission workflow finished")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] text-slate-500 text-center italic">
+                      Notice: In accordance with demonstration safeguards, complaints are delivered strictly to the configured demonstration inbox rather than live municipal dispatch.
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

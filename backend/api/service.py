@@ -19,6 +19,8 @@ from backend.rag.vector_store import VectorStoreManager
 from backend.rag.keyword_search import KeywordSearchManager
 from backend.rag.hybrid_search import HybridSearcher
 from backend.llm import get_llm, is_llm_configured
+from backend.services.email_service import EmailSubmissionService, default_email_service
+import backend.observability  # Auto-configures LangSmith tracing
 
 # Supported image MIME types and extensions
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -39,10 +41,12 @@ class AnalysisService:
         llm: Optional[Any] = None,
         db: Optional[DatabaseRepository] = None,
         hybrid_searcher: Optional[Any] = None,
+        email_service: Optional[EmailSubmissionService] = None,
     ):
         self._injected_llm = llm
         self.db = db if db is not None else DatabaseRepository()
         self._hybrid_searcher = hybrid_searcher
+        self.email_service = email_service or default_email_service
         self._app = None
 
     @property
@@ -78,6 +82,7 @@ class AnalysisService:
                 llm=self.llm,
                 db=self.db,
                 hybrid_searcher=searcher,
+                email_service=self.email_service,
             )
         return self._app
 
@@ -118,11 +123,14 @@ class AnalysisService:
         vision_result_override: Optional[Dict[str, Any]] = None,
     ) -> GraphState:
         """
-        Prepares the initial GraphState for execution.
+        Prepares the initial GraphState for execution with unique tracking IDs.
         """
-        run_id = f"run-{uuid.uuid4().hex[:8]}"
+        hex_suffix = uuid.uuid4().hex[:8].upper()
+        run_id = f"run-{hex_suffix.lower()}"
+        complaint_id = f"DEMO-COMPLAINT-RW26-{hex_suffix[:6]}"
         return {
             "run_id": run_id,
+            "complaint_id": complaint_id,
             "image_url": filepath,
             "user_location_hint": user_location_hint,
             "exif_gps": exif_gps,
@@ -138,6 +146,8 @@ class AnalysisService:
             "complaint_record": None,
             "final_quality_score": None,
             "quality_explanation": None,
+            "submission_status": "DETECTED",
+            "submission_result": None,
         }
 
     async def run_analysis(
@@ -383,14 +393,43 @@ class AnalysisService:
                         }
                         yield f"event: quality_evaluated\ndata: {json.dumps(payload)}\n\n"
 
+                    elif node_name == "email_submission":
+                        sub_res = updates.get("submission_result") or {}
+                        sub_status = updates.get("submission_status", "SUBMITTED")
+                        payload = {
+                            "event": "submission_completed" if sub_status == "SUBMITTED" else ("submission_skipped" if sub_status == "SUBMISSION_SKIPPED" else "submission_failed"),
+                            "node": "email_submission",
+                            "submission_status": sub_status,
+                            "recipient": sub_res.get("recipient"),
+                            "is_mock": sub_res.get("is_mock", True),
+                            "complaint_id": sub_res.get("complaint_id"),
+                            "pdf_attached": sub_res.get("pdf_attached", True),
+                            "timestamp": now_str,
+                        }
+                        yield f"event: submission_completed\ndata: {json.dumps(payload)}\n\n"
+
+                    elif node_name == "submission_rejected":
+                        sub_res = updates.get("submission_result") or {}
+                        payload = {
+                            "event": "submission_rejected",
+                            "node": "submission_rejected",
+                            "submission_status": "QUALITY_REJECTED",
+                            "reason": sub_res.get("reason"),
+                            "timestamp": now_str,
+                        }
+                        yield f"event: submission_rejected\ndata: {json.dumps(payload)}\n\n"
+
             # Final Event: workflow_completed
             completed_payload = {
                 "event": "workflow_completed",
                 "run_id": run_id,
+                "complaint_id": aggregated_state.get("complaint_id") or (aggregated_state.get("complaint_record") or {}).get("complaint_id"),
                 "complaint_record": aggregated_state.get("complaint_record"),
                 "final_quality_score": aggregated_state.get("final_quality_score"),
                 "quality_explanation": aggregated_state.get("quality_explanation"),
                 "requires_human_review": aggregated_state.get("requires_human_review"),
+                "submission_status": aggregated_state.get("submission_status", "COMPLAINT_GENERATED"),
+                "submission_result": aggregated_state.get("submission_result"),
                 "disclaimer": (
                     "SYNTHETIC DEMO RECORD — All data is fictional and intended "
                     "for demonstration purposes only."

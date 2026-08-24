@@ -8,15 +8,29 @@ Orchestrates the multi-agent workflow:
     ↓
   Location Agent
     ↓ (Conditional Route)
-    ├─→ [Location Known] ──→ Parallel: [Road Research] + [Contract Research] ──→ Evidence Aggregation ──→ Officer Research ──→ END
-    └─→ [Location Unknown] ──→ Unresolved Evidence Handler ──→ Officer Research ──→ END
+    ├─→ [Location Known] ──→ Parallel: [Road Research] + [Contract Research] ──→ Evidence Aggregation ──→ Officer Research
+    └─→ [Location Unknown] ──→ Unresolved Evidence Handler ──────────────────────────────────────────→ Officer Research
+                                                                                                            ↓
+                                                                                                    Verification Agent
+                                                                                                            ↓
+                                                                                                    Complaint Agent
+                                                                                                            ↓
+                                                                                                Quality Evaluation Agent
+                                                                                                            ↓ (Conditional Decision)
+                                                                                  ┌─────────────────────────┴────────────────────────┐
+                                                                                  ↓                                                  ↓
+                                                                        [Quality Approved]                                 [Quality Rejected]
+                                                                        Email Submission Node                              Submission Rejected Node
+                                                                                  ↓                                                  ↓
+                                                                                 END                                                END
 
 Design notes:
   - Multi-agent state is passed explicitly via GraphState.
-  - Dependency injection for LLM, DatabaseRepository, and HybridSearcher ensures
-    the graph can be tested offline without external API keys.
+  - Dependency injection for LLM, DatabaseRepository, HybridSearcher, and EmailSubmissionService
+    ensures the graph can be tested offline without external API keys or sending real emails.
   - Strict preservation of [DEMO] synthetic-data annotations.
 """
+from datetime import datetime, timezone
 from typing import Optional, Any, Dict, List
 from langgraph.graph import StateGraph, START, END
 
@@ -31,6 +45,7 @@ from backend.agents.complaint_agent import run_complaint_agent
 from backend.agents.quality_agent import run_quality_evaluation_agent
 from backend.database.repository import DatabaseRepository
 from backend.rag.hybrid_search import HybridSearcher
+from backend.services.email_service import EmailSubmissionService, default_email_service
 
 
 # ── Workflow Factory ─────────────────────────────────────────────────────────
@@ -39,6 +54,7 @@ def build_roadwatch_graph(
     llm: Optional[Any] = None,
     db: Optional[DatabaseRepository] = None,
     hybrid_searcher: Optional[Any] = None,
+    email_service: Optional[EmailSubmissionService] = None,
 ):
     """
     Build and compile the LangGraph workflow for RoadWatch AI.
@@ -53,19 +69,26 @@ def build_roadwatch_graph(
         Injected database repository for structured data lookups.
     hybrid_searcher : HybridSearcher | None
         Injected HybridSearcher for ChromaDB + BM25 retrieval.
+    email_service : EmailSubmissionService | None
+        Injected email service for complaint submission.
 
     Returns
     -------
     CompiledStateGraph
         The executable LangGraph app.
     """
+    active_email_service = email_service or default_email_service
+
     # ── 1. Node Implementations ──────────────────────────────────────────────
 
     def vision_node(state: GraphState) -> Dict[str, Any]:
         """Runs the Vision Agent to detect potholes and estimate severity."""
         if state.get("vision_result") is not None:
             # Pre-populated for testing or prior step
-            return {"vision_result": state["vision_result"]}
+            return {
+                "vision_result": state["vision_result"],
+                "submission_status": "DETECTED",
+            }
 
         image_url = state.get("image_url", "")
         if not image_url:
@@ -75,7 +98,8 @@ def build_roadwatch_graph(
                     "severity": "none",
                     "confidence": 0.0,
                     "visual_evidence": "[DEMO] No image URL provided.",
-                }
+                },
+                "submission_status": "DETECTED",
             }
 
         if llm is None:
@@ -86,7 +110,10 @@ def build_roadwatch_graph(
             )
 
         result = run_vision_agent(image_url=image_url, llm=llm)
-        return {"vision_result": result}
+        return {
+            "vision_result": result,
+            "submission_status": "DETECTED",
+        }
 
     def location_node(state: GraphState) -> Dict[str, Any]:
         """Runs the Location Agent to resolve the road using DEMO mechanisms."""
@@ -181,6 +208,7 @@ def build_roadwatch_graph(
         return {
             "evidence_conflicts": conflicts,
             "requires_human_review": len(conflicts) > 0,
+            "submission_status": "RESEARCHED",
         }
 
     def unresolved_evidence_node(state: GraphState) -> Dict[str, Any]:
@@ -205,6 +233,7 @@ def build_roadwatch_graph(
             },
             "evidence_conflicts": ["Unresolved road location — insufficient evidence to locate maintenance records."],
             "requires_human_review": True,
+            "submission_status": "RESEARCHED",
         }
 
     def officer_research_node(state: GraphState) -> Dict[str, Any]:
@@ -233,6 +262,7 @@ def build_roadwatch_graph(
             "evidence_conflicts": result["conflicts"],
             "verification_confidence": result["verification_confidence"],
             "requires_human_review": result["requires_human_review"],
+            "submission_status": "VERIFIED",
             # Store full verification result in complaint_record temporarily
             # (complaint node will replace it with the full record)
             "complaint_record": {"_verification_result": result},
@@ -244,6 +274,7 @@ def build_roadwatch_graph(
         verification_result = (state.get("complaint_record") or {}).get(
             "_verification_result"
         )
+        existing_cid = state.get("complaint_id")
         record = run_complaint_agent(
             run_id=state.get("run_id", "unknown"),
             vision_result=state.get("vision_result"),
@@ -252,8 +283,13 @@ def build_roadwatch_graph(
             contract_data=state.get("contract_data"),
             officer_data=state.get("officer_data"),
             verification_result=verification_result,
+            complaint_id=existing_cid,
         )
-        return {"complaint_record": record}
+        return {
+            "complaint_record": record,
+            "complaint_id": record.get("complaint_id"),
+            "submission_status": "COMPLAINT_GENERATED",
+        }
 
     def quality_evaluation_node(state: GraphState) -> Dict[str, Any]:
         """Computes a deterministic quality score for the pipeline run."""
@@ -270,9 +306,42 @@ def build_roadwatch_graph(
             officer_data=state.get("officer_data"),
             verification_result=verification_result,
         )
+        score = result["final_quality_score"]
+        status = "QUALITY_APPROVED" if score >= 70.0 else "QUALITY_REVIEW"
         return {
-            "final_quality_score": result["final_quality_score"],
+            "final_quality_score": score,
             "quality_explanation": result["quality_explanation"],
+            "submission_status": status,
+        }
+
+    def email_submission_node(state: GraphState) -> Dict[str, Any]:
+        """Submits the verified complaint with PDF attachment via EmailSubmissionService."""
+        submission_res = active_email_service.submit_complaint(state)
+        status_val = submission_res.get("status", "SUBMISSION_FAILED")
+        return {
+            "submission_status": status_val,
+            "submission_result": submission_res,
+        }
+
+    def submission_rejected_node(state: GraphState) -> Dict[str, Any]:
+        """Handles cases where automated submission was rejected due to quality/evidence issues."""
+        score = state.get("final_quality_score") or 0.0
+        pothole_detected = (state.get("vision_result") or {}).get("pothole_detected", False)
+        if not pothole_detected:
+            reason = "Automated submission skipped: No road damage/pothole detected."
+        elif score < 50.0:
+            reason = f"Automated submission rejected: Quality score ({score}/100) below minimum automated threshold (50/100)."
+        else:
+            reason = "Automated submission held for human review due to evidence conflicts or missing fields."
+
+        return {
+            "submission_status": "QUALITY_REJECTED",
+            "submission_result": {
+                "status": "REJECTED",
+                "reason": reason,
+                "quality_score": score,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         }
 
     # ── 2. Conditional Routing Logic ─────────────────────────────────────────
@@ -289,6 +358,19 @@ def build_roadwatch_graph(
             return "unresolved_evidence"
         return ["road_research", "contract_research"]
 
+    def route_after_quality(state: GraphState):
+        """
+        Determines whether the verified complaint is approved for automated email submission.
+        """
+        cr = state.get("complaint_record")
+        score = state.get("final_quality_score") or 0.0
+        pothole_detected = (state.get("vision_result") or {}).get("pothole_detected", False)
+
+        # Do not submit if complaint record is missing, no damage detected, or quality score is poor (< 50)
+        if not cr or not pothole_detected or score < 50.0:
+            return "submission_rejected"
+        return "email_submission"
+
     # ── 3. Graph Assembly ────────────────────────────────────────────────────
 
     workflow = StateGraph(GraphState)
@@ -304,6 +386,8 @@ def build_roadwatch_graph(
     workflow.add_node("verification", verification_node)
     workflow.add_node("complaint", complaint_node)
     workflow.add_node("quality_evaluation", quality_evaluation_node)
+    workflow.add_node("email_submission", email_submission_node)
+    workflow.add_node("submission_rejected", submission_rejected_node)
 
     # Add Edges
     workflow.add_edge(START, "vision")
@@ -328,10 +412,22 @@ def build_roadwatch_graph(
     workflow.add_edge("aggregate_evidence", "officer_research")
     workflow.add_edge("unresolved_evidence", "officer_research")
 
-    # New Milestone 5 chain
+    # Verification -> Complaint -> Quality Evaluation
     workflow.add_edge("officer_research", "verification")
     workflow.add_edge("verification", "complaint")
     workflow.add_edge("complaint", "quality_evaluation")
-    workflow.add_edge("quality_evaluation", END)
+
+    # Conditional routing after quality evaluation: submission vs rejected
+    workflow.add_conditional_edges(
+        "quality_evaluation",
+        route_after_quality,
+        {
+            "email_submission": "email_submission",
+            "submission_rejected": "submission_rejected",
+        },
+    )
+
+    workflow.add_edge("email_submission", END)
+    workflow.add_edge("submission_rejected", END)
 
     return workflow.compile()
