@@ -19,6 +19,7 @@ from backend.rag.vector_store import VectorStoreManager
 from backend.rag.keyword_search import KeywordSearchManager
 from backend.rag.hybrid_search import HybridSearcher
 from backend.llm import get_llm, is_llm_configured
+from backend.config import settings
 from backend.services.email_service import EmailSubmissionService, default_email_service
 import backend.observability  # Auto-configures LangSmith tracing
 
@@ -64,7 +65,9 @@ class AnalysisService:
     def get_hybrid_searcher(self) -> HybridSearcher:
         if self._hybrid_searcher is None:
             try:
-                vm = VectorStoreManager(persist_directory="./chroma_db")
+                persist_dir = settings.CHROMA_PERSIST_DIRECTORY
+                os.makedirs(persist_dir, exist_ok=True)
+                vm = VectorStoreManager(persist_directory=persist_dir)
                 # Ingest if empty
                 if vm.vector_store._collection.count() == 0:
                     vm.ingest_documents()

@@ -7,7 +7,13 @@ from langchain_core.documents import Document
 
 def load_and_split_contracts(documents_dir: str = None) -> List[Document]:
     if documents_dir is None:
-        documents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../documents/contracts'))
+        candidates = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), '../../documents/contracts')),
+            os.path.abspath(os.path.join(os.getcwd(), 'documents/contracts')),
+            os.path.abspath(os.path.join(os.getcwd(), 'documents')),
+            os.path.abspath(os.path.join(os.getcwd(), '../documents/contracts')),
+        ]
+        documents_dir = next((c for c in candidates if os.path.exists(c) and any(f.endswith('.pdf') for f in os.listdir(c))), candidates[0])
         
     all_chunks = []
     

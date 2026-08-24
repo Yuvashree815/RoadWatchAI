@@ -22,7 +22,12 @@ class DatabaseRepository:
         
         if not self.use_supabase:
             print("WARNING: Supabase credentials not found or invalid. Using local CSV data as a fallback.")
-            self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data'))
+            candidates = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data')),
+                os.path.abspath(os.path.join(os.getcwd(), 'data')),
+                os.path.abspath(os.path.join(os.getcwd(), '../data')),
+            ]
+            self.data_dir = next((c for c in candidates if os.path.exists(c) and os.path.exists(os.path.join(c, "roads.csv"))), candidates[0])
 
     def _read_csv(self, filename: str) -> List[dict]:
         filepath = os.path.join(self.data_dir, filename)

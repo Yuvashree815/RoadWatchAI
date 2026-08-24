@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 
+from backend.config import settings
 from backend.api.service import default_analysis_service, UPLOAD_DIR
 from backend.utils.complaint_pdf import generate_complaint_pdf
 
@@ -23,10 +24,31 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# ── CORS Configuration ────────────────────────────────────────────────────────
+# ── Production CORS Configuration ─────────────────────────────────────────────
+def get_allowed_origins() -> list:
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+    frontend_url = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
+    if frontend_url and frontend_url not in origins:
+        origins.append(frontend_url)
+
+    extra_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+    if extra_origins:
+        for o in extra_origins.split(","):
+            cleaned = o.strip().rstrip("/")
+            if cleaned and cleaned not in origins:
+                origins.append(cleaned)
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_allowed_origins(),
+    allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -166,4 +188,12 @@ async def download_complaint_pdf(payload: Dict[str, Any]):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate complaint PDF: {str(e)}",
         )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=False)
+
 
