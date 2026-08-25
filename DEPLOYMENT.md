@@ -54,7 +54,7 @@
 1. In your Railway service dashboard, go to **Settings**:
    - **Root Directory:** `/` (default repository root)
    - **Build Command:** `pip install -r requirements.txt` (or default Nixpacks)
-   - **Start Command:** `uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}`
+   - **Start Command:** `python -m backend.main`
 2. Under **Networking**, click **"Generate Domain"** (e.g. `roadwatch-production.up.railway.app`).
 3. Note your Railway public URL (e.g. `https://roadwatch-production.up.railway.app`).
 
